@@ -1,5 +1,4 @@
 # Keep the Docker build context lean, but NEVER exclude app sources
-# (electron/, src/, cli/, assets/, sdk/, docs/openapi.json).
 
 node_modules
 .git
@@ -27,3 +26,9 @@ Thumbs.db
 .idea
 coverage
 agent-transcripts
+!electron/
+!src/
+!cli/
+!assets/
+!sdk/
+!docs/openapi.json
