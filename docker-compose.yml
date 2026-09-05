@@ -6,7 +6,10 @@
 
 services:
   proxima:
-    build: .
+    build:
+      # MUST be the repo root (directory with electron/, package.json, Dockerfile)
+      context: .
+      dockerfile: Dockerfile
     image: proxima:latest
     restart: unless-stopped
     ports:

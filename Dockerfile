@@ -1,10 +1,14 @@
 # Proxima — headless Electron hub sized for ~512MB VPS
-# Build:  docker build -t proxima .
-# Run:    docker run --rm -p 3210:3210 --memory=512m --memory-swap=1g \
-#           -e PROXIMA_API_KEY=sk-... \
-#           -e PROXIMA_PROVIDER=chatgpt \
-#           -e PROXIMA_COOKIES_CHATGPT_FILE=/cookies/chatgpt.json \
-#           -v ./cookies:/cookies:ro -v proxima-data:/data proxima
+# Build from the REPO ROOT (folder that contains electron/, src/, package.json):
+#   docker build -t proxima .
+#   docker compose up -d --build
+#
+# Run:
+#   docker run --rm -p 3210:3210 --memory=512m --memory-swap=1g --shm-size=256m \
+#     -e PROXIMA_API_KEY=sk-... \
+#     -e PROXIMA_PROVIDER=chatgpt \
+#     -e PROXIMA_COOKIES_CHATGPT='[...]' \
+#     -v proxima-data:/data proxima
 
 FROM node:20-bookworm-slim
 
@@ -60,18 +64,55 @@ RUN npm ci --ignore-scripts \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
+# Full app sources — build context MUST be the Proxima repo root
 COPY electron ./electron
 COPY src ./src
 COPY cli ./cli
 COPY assets ./assets
 COPY sdk ./sdk
 COPY docs/openapi.json ./docs/openapi.json
-COPY scripts/docker-entrypoint.sh /usr/local/bin/proxima-entrypoint
 
-RUN sed -i 's/\r$//' /usr/local/bin/proxima-entrypoint \
-    && chmod +x /usr/local/bin/proxima-entrypoint \
-    && mkdir -p /data \
-    && chown -R node:node /app /data
+# Fail early with a clear message if the context was incomplete (Coolify/base-dir mistakes)
+RUN set -eu; \
+    for p in electron/main-v2.cjs src/mcp/index.js cli/proxima-cli.cjs docs/openapi.json node_modules/electron; do \
+      if [ ! -e "$p" ]; then \
+        echo "ERROR: missing $p — Docker build context is not the Proxima repo root."; \
+        echo "Set the build context / base directory to the folder that contains electron/, src/, package.json."; \
+        ls -la; \
+        exit 1; \
+      fi; \
+    done
+
+# Entrypoint inlined (no dependency on scripts/ in the build context)
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'export PROXIMA_SERVER="${PROXIMA_SERVER:-1}"' \
+  'export PROXIMA_LOW_MEMORY="${PROXIMA_LOW_MEMORY:-1}"' \
+  'export PROXIMA_SKIP_PYTHON="${PROXIMA_SKIP_PYTHON:-1}"' \
+  'export PROXIMA_SKIP_MCP="${PROXIMA_SKIP_MCP:-1}"' \
+  'export PROXIMA_PROVIDER="${PROXIMA_PROVIDER:-chatgpt}"' \
+  'export PROXIMA_HOST="${PROXIMA_HOST:-0.0.0.0}"' \
+  'export PROXIMA_REST_PORT="${PROXIMA_REST_PORT:-3210}"' \
+  'export PROXIMA_DATA_DIR="${PROXIMA_DATA_DIR:-/data}"' \
+  'export ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-x11}"' \
+  'export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=128}"' \
+  'mkdir -p "$PROXIMA_DATA_DIR"' \
+  'if [ -z "${DISPLAY:-}" ]; then' \
+  '  export DISPLAY=:99' \
+  '  Xvfb :99 -screen 0 1024x768x24 -ac -nolisten tcp -dpi 96 >/tmp/xvfb.log 2>&1 &' \
+  '  XVFB_PID=$!' \
+  '  trap "kill $XVFB_PID 2>/dev/null || true" EXIT INT TERM' \
+  '  i=0' \
+  '  while [ ! -e /tmp/.X11-unix/X99 ] && [ "$i" -lt 50 ]; do i=$((i + 1)); sleep 0.1; done' \
+  'fi' \
+  'echo "[entrypoint] REST http://${PROXIMA_HOST}:${PROXIMA_REST_PORT} provider=${PROXIMA_PROVIDERS:-$PROXIMA_PROVIDER} docs=/ swagger=/swagger"' \
+  'cd /app' \
+  'exec ./node_modules/.bin/electron . --headless --server --no-sandbox "$@"' \
+  > /usr/local/bin/proxima-entrypoint \
+  && chmod +x /usr/local/bin/proxima-entrypoint \
+  && mkdir -p /data \
+  && chown -R node:node /app /data
 
 USER node
 EXPOSE 3210
