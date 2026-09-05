@@ -1,0 +1,54 @@
+# Proxima on a 512MB VPS — one provider, cookies from env/files, REST on :3210
+#
+# 1. cp .env.docker.example .env   # set PROXIMA_API_KEY + cookies
+# 2. Optional: put EditThisCookie JSON in ./cookies/chatgpt.json
+# 3. docker compose up -d --build
+
+services:
+  proxima:
+    build: .
+    image: proxima:latest
+    restart: unless-stopped
+    ports:
+      - "${PROXIMA_REST_PORT:-3210}:3210"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PROXIMA_SERVER: "1"
+      PROXIMA_LOW_MEMORY: "1"
+      PROXIMA_SKIP_PYTHON: "1"
+      PROXIMA_SKIP_MCP: "1"
+      PROXIMA_HOST: "0.0.0.0"
+      PROXIMA_REST_PORT: "3210"
+      PROXIMA_DATA_DIR: /data
+      # ChatGPT only — fits 512MB. Do not enable multiple providers on small VPS.
+      PROXIMA_PROVIDER: ${PROXIMA_PROVIDER:-chatgpt}
+      PROXIMA_API_KEY: ${PROXIMA_API_KEY:?set PROXIMA_API_KEY in .env}
+      # Cookie JSON (or base64 JSON) from host .env — preferred for pure-env deploys
+      PROXIMA_COOKIES: ${PROXIMA_COOKIES:-}
+      PROXIMA_COOKIES_FILE: ${PROXIMA_COOKIES_FILE:-}
+      PROXIMA_COOKIES_CHATGPT: ${PROXIMA_COOKIES_CHATGPT:-}
+      PROXIMA_COOKIES_CLAUDE: ${PROXIMA_COOKIES_CLAUDE:-}
+      PROXIMA_COOKIES_GEMINI: ${PROXIMA_COOKIES_GEMINI:-}
+      PROXIMA_COOKIES_PERPLEXITY: ${PROXIMA_COOKIES_PERPLEXITY:-}
+      # File mounts (skip quietly if missing). Override paths via .env if needed.
+      PROXIMA_COOKIES_CHATGPT_FILE: ${PROXIMA_COOKIES_CHATGPT_FILE:-/cookies/chatgpt.json}
+      PROXIMA_COOKIES_CLAUDE_FILE: ${PROXIMA_COOKIES_CLAUDE_FILE:-/cookies/claude.json}
+      PROXIMA_COOKIES_GEMINI_FILE: ${PROXIMA_COOKIES_GEMINI_FILE:-/cookies/gemini.json}
+      PROXIMA_COOKIES_PERPLEXITY_FILE: ${PROXIMA_COOKIES_PERPLEXITY_FILE:-/cookies/perplexity.json}
+      NODE_OPTIONS: "--max-old-space-size=128"
+    volumes:
+      - proxima-data:/data
+      - ${COOKIES_DIR:-./cookies}:/cookies:ro
+    # Hard cap near 512MB; swap gives Chromium headroom during page load spikes.
+    mem_limit: 512m
+    memswap_limit: 1024m
+    # Electron/Chromium needs shared memory; disable-dev-shm-usage is also set in-app.
+    shm_size: 256mb
+    security_opt:
+      - seccomp:unconfined
+    init: true
+
+volumes:
+  proxima-data:
